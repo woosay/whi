@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>위스키 관리 앱</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; background:#f7f7f7; color:#222; }
+    h1 { margin-bottom: 1rem; }
+    .card { background:#fff; border-radius:12px; padding:1rem; box-shadow:0 2px 8px rgba(0,0,0,.08); margin-bottom:1rem; }
+    form { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:.75rem; }
+    input, select, button, textarea { padding:.6rem; border:1px solid #ccc; border-radius:8px; font-size:.95rem; }
+    button { cursor:pointer; background:#222; color:#fff; }
+    button.secondary { background:#666; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { padding:.6rem; border-bottom:1px solid #e5e5e5; text-align:left; }
+    .row-actions { display:flex; gap:.4rem; }
+    .pill { border-radius:999px; padding:.15rem .5rem; font-size:.8rem; color:#fff; }
+    .Opened { background:#2f8f2f; }
+    .Unopened { background:#5a5a5a; }
+    .Wishlist { background:#8f6a00; }
+    .top-bar { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+    .top-bar input { max-width:260px; }
+  </style>
+</head>
+<body>
+  <h1>🥃 위스키 관리 앱</h1>
+
+  <div class="card">
+    <h2>위스키 추가 / 수정</h2>
+    <form id="whiskyForm">
+      <input type="hidden" id="editId" />
+      <input id="name" placeholder="이름 (예: 맥캘란 12)" required />
+      <input id="distillery" placeholder="증류소" required />
+      <input id="abv" type="number" min="0" max="100" step="0.1" placeholder="도수(ABV)" required />
+      <input id="year" type="number" min="1900" max="2100" placeholder="숙성 연수" />
+      <select id="status" required>
+        <option value="Unopened">미개봉</option>
+        <option value="Opened">개봉</option>
+        <option value="Wishlist">위시리스트</option>
+      </select>
+      <input id="rating" type="number" min="0" max="5" step="0.5" placeholder="평점(0~5)" />
+      <textarea id="notes" placeholder="테이스팅 노트" rows="2"></textarea>
+      <button type="submit">저장</button>
+      <button type="button" id="resetBtn" class="secondary">초기화</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="top-bar">
+      <h2 style="margin:0;">내 컬렉션</h2>
+      <input id="search" placeholder="이름/증류소 검색" />
+      <select id="statusFilter">
+        <option value="ALL">전체 상태</option>
+        <option value="Unopened">미개봉</option>
+        <option value="Opened">개봉</option>
+        <option value="Wishlist">위시리스트</option>
+      </select>
+      <button id="exportBtn" class="secondary">JSON 내보내기</button>
+      <input id="importFile" type="file" accept="application/json" />
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>이름</th><th>증류소</th><th>ABV</th><th>연수</th><th>상태</th><th>평점</th><th>메모</th><th>작업</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+<script>
+const KEY = 'whiskyCollectionV1';
+const form = document.getElementById('whiskyForm');
+const tbody = document.getElementById('tbody');
+const resetBtn = document.getElementById('resetBtn');
+const search = document.getElementById('search');
+const statusFilter = document.getElementById('statusFilter');
+
+const fields = ['editId','name','distillery','abv','year','status','rating','notes']
+  .reduce((acc,id)=> (acc[id]=document.getElementById(id), acc), {});
+
+const load = () => JSON.parse(localStorage.getItem(KEY) || '[]');
+const save = (items) => localStorage.setItem(KEY, JSON.stringify(items));
+const id = () => Math.random().toString(36).slice(2,10);
+
+function clearForm(){
+  form.reset();
+  fields.editId.value='';
+  fields.status.value='Unopened';
+}
+
+function render(){
+  const q = search.value.trim().toLowerCase();
+  const sf = statusFilter.value;
+  const items = load().filter(w => {
+    const matchesText = !q || [w.name,w.distillery].some(v => (v||'').toLowerCase().includes(q));
+    const matchesStatus = sf === 'ALL' || w.status === sf;
+    return matchesText && matchesStatus;
+  });
+
+  tbody.innerHTML = items.map(w => `
+    <tr>
+      <td>${w.name}</td>
+      <td>${w.distillery}</td>
+      <td>${w.abv}%</td>
+      <td>${w.year || '-'}</td>
+      <td><span class="pill ${w.status}">${labelStatus(w.status)}</span></td>
+      <td>${w.rating ?? '-'}</td>
+      <td>${w.notes || '-'}</td>
+      <td class="row-actions">
+        <button onclick="editItem('${w.id}')">수정</button>
+        <button class="secondary" onclick="deleteItem('${w.id}')">삭제</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function labelStatus(s){
+  if (s==='Opened') return '개봉';
+  if (s==='Wishlist') return '위시리스트';
+  return '미개봉';
+}
+
+function editItem(targetId){
+  const w = load().find(x => x.id===targetId);
+  if(!w) return;
+  Object.keys(fields).forEach(k => fields[k].value = w[k] ?? '');
+}
+
+function deleteItem(targetId){
+  if(!confirm('삭제할까요?')) return;
+  save(load().filter(x => x.id!==targetId));
+  render();
+}
+
+window.editItem = editItem;
+window.deleteItem = deleteItem;
+
+form.addEventListener('submit', e => {
+  e.preventDefault();
+  const item = {
+    id: fields.editId.value || id(),
+    name: fields.name.value.trim(),
+    distillery: fields.distillery.value.trim(),
+    abv: Number(fields.abv.value),
+    year: fields.year.value ? Number(fields.year.value) : null,
+    status: fields.status.value,
+    rating: fields.rating.value ? Number(fields.rating.value) : null,
+    notes: fields.notes.value.trim()
+  };
+
+  const list = load();
+  const idx = list.findIndex(x => x.id===item.id);
+  if(idx >= 0) list[idx] = item; else list.unshift(item);
+  save(list);
+  clearForm();
+  render();
+});
+
+resetBtn.addEventListener('click', clearForm);
+search.addEventListener('input', render);
+statusFilter.addEventListener('change', render);
+
+document.getElementById('exportBtn').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(load(), null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'whisky-collection.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+document.getElementById('importFile').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if(!file) return;
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if(!Array.isArray(data)) throw new Error('배열 형식이 아닙니다.');
+    save(data);
+    render();
+    alert('가져오기 완료!');
+  } catch(err){
+    alert('가져오기 실패: ' + err.message);
+  }
+});
+
+clearForm();
+render();
+</script>
+</body>
+</html>
