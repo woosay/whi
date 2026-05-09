@@ -61,7 +61,7 @@
       <input id="apiQuery" placeholder="예: Glenfiddich, Macallan" />
       <button class="primary" id="fetchBtn"><i class="fa-solid fa-magnifying-glass"></i> API 검색</button>
     </div>
-    <p class="small">공개 샘플 API(sampleapis.com)에서 이름/종류/도수/이미지를 불러옵니다.</p>
+    <p class="small">CocktailDB API에서 위스키 기반 레시피의 이름/이미지/설명을 불러옵니다.</p>
     <div class="api-grid" id="apiResults"></div>
   </section>
 
@@ -94,7 +94,9 @@
 </div>
 
 <script>
-const KEY='whiskyCollectionV1'; const API='https://api.sampleapis.com/whiskies/whiskies';
+const KEY='whiskyCollectionV1';
+const API_LIST='https://www.thecocktaildb.com/api/json/v1/1/filter.php?i=Whiskey';
+const API_DETAIL='https://www.thecocktaildb.com/api/json/v1/1/lookup.php?i=';
 const $=id=>document.getElementById(id);
 const form=$('whiskyForm'), tbody=$('tbody'), stats=$('stats'), apiResults=$('apiResults');
 const fields=['editId','name','distillery','abv','year','status','rating','notes'].reduce((a,id)=>(a[id]=$(id),a),{});
@@ -112,11 +114,11 @@ function render(){ const all=load(); drawStats(all); const q=$('search').value.t
 
 function normalizeApiItem(x){
   return {
-    name: x.name || x.title || x.whisky || '이름 없음',
-    distillery: x.distillery || x.brand || x.region || '미상',
-    abv: Number(String(x.abv || x.proof || '').replace(/[^0-9.]/g,'')) || 40,
-    image: x.image || x.photo || x.img || '',
-    notes: x.description || x.tastingNotes || x.category || ''
+    name: x.strDrink || x.name || "이름 없음",
+    distillery: "CocktailDB",
+    abv: 40,
+    image: x.strDrinkThumb || "",
+    notes: x.strInstructions || ""
   }
 }
 
@@ -127,10 +129,19 @@ function renderApiResults(items){
 async function fetchWhiskies(){
   $('fetchBtn').disabled=true; $('fetchBtn').textContent='불러오는 중...';
   try{
-    const res=await fetch(API); if(!res.ok) throw new Error('API 요청 실패');
-    const raw=await res.json();
+    const listRes=await fetch(API_LIST); if(!listRes.ok) throw new Error('API 요청 실패');
+    const listJson=await listRes.json();
+    const drinks=(listJson.drinks||[]).slice(0,36);
+    const details=await Promise.all(drinks.map(async d=>{
+      try{
+        const r=await fetch(API_DETAIL + d.idDrink);
+        if(!r.ok) return d;
+        const j=await r.json();
+        return { ...d, ...(j.drinks?.[0]||{}) };
+      }catch{ return d; }
+    }));
     const query=$('apiQuery').value.trim().toLowerCase();
-    apiCache=raw.map(normalizeApiItem).filter(v=>!query || `${v.name} ${v.distillery}`.toLowerCase().includes(query)).slice(0,24);
+    apiCache=details.map(normalizeApiItem).filter(v=>!query || v.name.toLowerCase().includes(query)).slice(0,24);
     renderApiResults(apiCache);
   }catch(err){ apiResults.innerHTML=`<p class="muted">불러오기 실패: ${err.message}</p>`; }
   finally{ $('fetchBtn').disabled=false; $('fetchBtn').innerHTML='<i class="fa-solid fa-magnifying-glass"></i> API 검색'; }
